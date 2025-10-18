@@ -1,0 +1,37 @@
+---
+- name: Deploy Grafana con Docker
+  hosts: grafana
+  become: true
+
+  vars:
+    grafana_port: "{{ grafana_port | default(3000) }}"
+    grafana_domain: "{{ grafana_domain | default('grafana.local') }}"
+    grafana_data_path: "{{ grafana_data_path | default('/opt/grafana') }}"
+    grafana_image: "{{ grafana_image | default('grafana/grafana:latest') }}"
+
+  tasks:
+    - name: Instalar Docker
+      apt:
+        name: docker.io
+        state: present
+        update_cache: yes
+
+    - name: Crear carpeta de datos
+      file:
+        path: "{{ grafana_data_path }}"
+        state: directory
+        mode: "0755"
+
+    - name: Ejecutar contenedor Grafana
+      shell: |
+        docker run -d --name grafana \
+          --restart unless-stopped \
+          -p {{ grafana_port }}:3000 \
+          -e GF_SERVER_DOMAIN="{{ grafana_domain }}" \
+          -e GF_SECURITY_ADMIN_USER="${GRAFANA_ADMIN_USER}" \
+          -e GF_SECURITY_ADMIN_PASSWORD="${GRAFANA_ADMIN_PASSWORD}" \
+          -v {{ grafana_data_path }}:/var/lib/grafana \
+          {{ grafana_image }}
+      args:
+        warn: false
+

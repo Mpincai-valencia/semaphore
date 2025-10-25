@@ -1,34 +1,66 @@
+k---
 - name: Deploy Gitea with Docker
   hosts: gitea
   become: true
+  vars:
+    gitea_port: 3052
+    gitea_domain: giteadia.seedtecno.com
+    gitea_admin_user: admin
+    gitea_admin_password: "{{ gitea_admin_password }}"
+    gitea_data_path: /opt/gitea
+
   tasks:
-    - name: Instalar Docker
+    - name: Install Docker
       apt:
         name: docker.io
         state: present
         update_cache: yes
 
-    - name: Crear carpeta de datos de Gitea
+    - name: Create Gitea data directory
       file:
         path: "{{ gitea_data_path }}"
         state: directory
         mode: "0755"
 
-    - name: Detener contenedor Gitea si existe
-      shell: docker rm -f gitea 2>/dev/null || true
-      args:
-        warn: false
+    - name: Pull the Gitea Docker image
+      docker_image:
+        name: gitea/gitea
+        source: pull
 
-    - name: Desplegar contenedor Gitea
-      shell: |
-        docker run -d --name gitea \
-          --restart unless-stopped \
-          -p {{ gitea_port }}:3000 \
-          -e GITEA__server__DOMAIN="{{ gitea_domain }}" \
-          -e GITEA__security__ADMIN_USER="{{ gitea_admin_user }}" \
-          -e GITEA__security__ADMIN_PASSWORD="{{ gitea_admin_password }}" \
-          -v {{ gitea_data_path }}:/data \
-          gitea/gitea:latest
-      args:
-        warn: false
+    - name: Start Gitea container
+      docker_container:
+        name: gitea
+        image: gitea/gitea
+        state: started
+        restart_policy: unless-stopped
+        ports:
+          - "{{ gitea_port }}:3000"
+        env:
+          - GITEA__server__DOMAIN: "{{ gitea_domain }}"
+          - GITEA__security__INSTALL_LOCK: "true"
+          - GITEA__database__DB_TYPE: "sqlite3"
+          - GITEA__database__PATH: "{{ gitea_data_path }}/gitea.db"
+          - GITEA__security__SECRET_KEY: "random_secret_key"
+          - GITEA__security__INTERNAL_TOKEN: "random_internal_token"
+        volumes:
+          - "{{ gitea_data_path }}:/data"
+        command: >
+          /bin/bash -c "sleep 5; /usr/bin/gitea web"
+          
+    - name: Create Gitea admin user
+      uri:
+        url: "http://localhost:{{ gitea_port }}/install"
+        method: POST
+        body_format: json
+        body:
+          username: "{{ gitea_admin_user }}"
+          password: "{{ gitea_admin_password }}"
+          email: "admin@{{ gitea_domain }}"
+          retype_password: "{{ gitea_admin_password }}"
+          repository_root_path: "{{ gitea_data_path }}/repos"
+          database: "sqlite3"
+          application_name: "Gitea"
+        headers:
+          Content-Type: "application/json"
+        status_code: 200
 

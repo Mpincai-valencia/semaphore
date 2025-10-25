@@ -3,12 +3,6 @@
   hosts: grafana
   become: true
 
-  vars:
-    grafana_port: "{{ grafana_port | default(3000) }}"
-    grafana_domain: "{{ grafana_domain | default('grafana.local') }}"
-    grafana_data_path: "{{ grafana_data_path | default('/opt/grafana') }}"
-    grafana_image: "{{ grafana_image | default('grafana/grafana:latest') }}"
-
   tasks:
     - name: Instalar Docker
       apt:
@@ -16,22 +10,29 @@
         state: present
         update_cache: yes
 
-    - name: Crear carpeta de datos
+    - name: Crear carpeta de datos de Grafana
       file:
         path: "{{ grafana_data_path }}"
         state: directory
         mode: "0755"
 
-    - name: Ejecutar contenedor Grafana
+    - name: Detener contenedor Grafana si existe
+      shell: docker rm -f grafana 2>/dev/null || true
+      args:
+        warn: false
+
+    - name: Desplegar contenedor Grafana
       shell: |
         docker run -d --name grafana \
           --restart unless-stopped \
           -p {{ grafana_port }}:3000 \
           -e GF_SERVER_DOMAIN="{{ grafana_domain }}" \
-          -e GF_SECURITY_ADMIN_USER="${GRAFANA_ADMIN_USER}" \
-          -e GF_SECURITY_ADMIN_PASSWORD="${GRAFANA_ADMIN_PASSWORD}" \
+          -e GF_SECURITY_ADMIN_USER="{{ GRAFANA_ADMIN_USER }}" \
+          -e GF_SECURITY_ADMIN_PASSWORD="{{ GRAFANA_ADMIN_PASSWORD }}" \
           -v {{ grafana_data_path }}:/var/lib/grafana \
-          {{ grafana_image }}
+          grafana/grafana:latest
       args:
         warn: false
+
+
 

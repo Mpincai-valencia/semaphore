@@ -1,57 +1,34 @@
----
-- name: Deploy Gitea container
+- name: Deploy Gitea with Docker
   hosts: gitea
-  become: yes
-  vars:
-    gitea_image: "gitea/gitea:latest"
-    gitea_http_port: "{{ gitea_port }}"
-    gitea_domain: "{{ gitea_domain }}"
-    gitea_admin_user: "{{ gitea_admin_user }}"
-    gitea_admin_password: "{{ gitea_admin_password }}"
-  
+  become: true
   tasks:
-    - name: Pull the Gitea Docker image
-      docker_image:
-        name: "{{ gitea_image }}"
-        source: pull
+    - name: Instalar Docker
+      apt:
+        name: docker.io
+        state: present
+        update_cache: yes
 
-    - name: Create a Gitea Docker container
-      docker_container:
-        name: gitea
-        image: "{{ gitea_image }}"
-        state: started
-        restart_policy: always
-        published_ports:
-          - "{{ gitea_http_port }}:3052"
-        env:
-          GITEA_HTTP_PORT: "{{ gitea_http_port }}"
-          GITEA_DOMAIN: "{{ gitea_domain }}"
-          GITEA_ADMIN_USER: "{{ gitea_admin_user }}"
-          GITEA_ADMIN_PASSWORD: "{{ gitea_admin_password }}"
-        volumes:
-          - /data/gitea:/data
-        networks:
-          - gitea_network
-        log_driver: json-file
-        log_options:
-          max-size: "10m"
-          max-file: "3"
+    - name: Crear carpeta de datos de Gitea
+      file:
+        path: "{{ gitea_data_path }}"
+        state: directory
+        mode: "0755"
 
-    - name: Wait for Gitea to be up and running
-      wait_for:
-        port: "{{ gitea_http_port }}"
-        delay: 10
-        timeout: 60
+    - name: Detener contenedor Gitea si existe
+      shell: docker rm -f gitea 2>/dev/null || true
+      args:
+        warn: false
 
-    - name: Ensure Gitea is accessible
-      uri:
-        url: "http://{{ gitea_domain }}:{{ gitea_http_port }}"
-        method: GET
-        status_code: 200
-        return_content: yes
-      register: gitea_status
-
-    - name: Display Gitea status
-      debug:
-        var: gitea_status.content
+    - name: Desplegar contenedor Gitea
+      shell: |
+        docker run -d --name gitea \
+          --restart unless-stopped \
+          -p {{ gitea_port }}:3000 \
+          -e GITEA__server__DOMAIN="{{ gitea_domain }}" \
+          -e GITEA__security__ADMIN_USER="{{ gitea_admin_user }}" \
+          -e GITEA__security__ADMIN_PASSWORD="{{ gitea_admin_password }}" \
+          -v {{ gitea_data_path }}:/data \
+          gitea/gitea:latest
+      args:
+        warn: false
 

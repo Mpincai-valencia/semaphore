@@ -1,0 +1,42 @@
+---
+- name: Deploy Gitea
+  hosts: all
+  become: true
+  vars:
+    gitea_port: "{{ gitea_port }}"
+    gitea_domain: "{{ gitea_domain }}"
+    gitea_admin_user: "{{ gitea_admin_user }}"
+    gitea_admin_password: "{{ gitea_admin_password }}"
+  tasks:
+    - name: Pull Gitea Docker image
+      docker_image:
+        name: gitea/gitea
+        tag: latest
+        source: pull
+
+    - name: Create Gitea container
+      docker_container:
+        name: gitea
+        image: gitea/gitea:latest
+        state: started
+        restart_policy: unless-stopped
+        published_ports:
+          - "{{ gitea_port }}:3052"
+        env:
+          - GITEEA_HTTP_PORT=3052
+          - GITEEA_ADMIN_USER="{{ gitea_admin_user }}"
+          - GITEEA_ADMIN_PASSWORD="{{ gitea_admin_password }}"
+        volumes:
+          - /opt/gitea:/data
+
+    - name: Ensure Gitea is up and running
+      uri:
+        url: "http://{{ gitea_domain }}:{{ gitea_port }}"
+        status_code: 200
+        register: result
+
+    - name: Fail if Gitea is not accessible
+      fail:
+        msg: "Gitea service is not accessible"
+      when: result.status != 200
+

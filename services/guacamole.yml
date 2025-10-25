@@ -1,0 +1,32 @@
+---
+- name: Deploy Guacamole
+  hosts: guacamole
+  become: yes
+  vars:
+    guacamole_port: "{{ guacamole_port }}"
+    guacamole_domain: "{{ guacamole_domain }}"
+    guacamole_admin_user: "{{ guacamole_admin_user }}"
+    guacamole_admin_password: "{{ guacamole_admin_password }}"
+
+  tasks:
+    - name: Install Guacamole
+      docker_container:
+        name: guacamole
+        image: guacamole/guacamole:latest
+        state: started
+        restart_policy: always
+        exposed_ports:
+          - "{{ guacamole_port }}"
+        published_ports:
+          - "{{ guacamole_port }}:8080"
+        env:
+          GUACAMOLE_HOME: "/etc/guacamole"
+          GUACAMOLE_USER: "{{ guacamole_admin_user }}"
+          GUACAMOLE_PASSWORD: "{{ guacamole_admin_password }}"
+        volumes:
+          - /opt/guacamole:/etc/guacamole
+        networks:
+          - guacamole_network
+      tags:
+        - guacamole
+

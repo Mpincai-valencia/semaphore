@@ -1,6 +1,7 @@
 - name: Deploy Gitea with Docker
   hosts: 192.168.200.125
   become: true
+  remote_user: "{{ ansible_ssh_user }}"  # Usando la variable ansible_ssh_user
 
   tasks:
     - name: Install Docker
@@ -35,4 +36,3 @@
           gitea/gitea:latest
       args:
         warn: false
-

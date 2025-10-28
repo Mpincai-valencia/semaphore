@@ -1,5 +1,5 @@
 - name: Deploy Gitea with Docker
-  hosts: gitea
+  hosts: 192.168.200.125
   become: true
 
   tasks:

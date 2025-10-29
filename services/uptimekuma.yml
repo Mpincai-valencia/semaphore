@@ -2,11 +2,6 @@
 - name: Mantenimiento automático de Uptime Kuma
   hosts: uptimekuma
   become: yes
-  vars:
-    uptimekuma_port: "{{ lookup('env', 'uptimekuma_port') | default('3001', true) }}"
-    uptimekuma_domain: "{{ lookup('env', 'uptimekuma_domain') }}"
-    uptimekuma_admin_user: "{{ lookup('env', 'uptimekuma_admin_user') }}"
-    uptimekuma_admin_password: "{{ lookup('env', 'uptimekuma_admin_password') }}"
   tasks:
 
     - name: Actualizar lista de paquetes
@@ -19,31 +14,20 @@
         autoremove: yes
         autoclean: yes
 
-    - name: Verificar si el contenedor de Uptime Kuma existe
-      command: docker ps -a --filter "name=uptime-kuma" --format "{{'{{.Names}}'}}"
-      register: kuma_container
-      ignore_errors: yes
-
-    - name: Actualizar imagen de Uptime Kuma (si usa Docker)
-      when: kuma_container.stdout != ""
-      block:
-        - name: Descargar última versión de la imagen
-          command: docker pull louislam/uptime-kuma:latest
-
-        - name: Reiniciar contenedor Uptime Kuma con la nueva imagen
-          shell: |
-            docker stop uptime-kuma
-            docker rm uptime-kuma
-            docker run -d --restart=always \
-              -p {{ uptimekuma_port }}:3001 \
-              -v /opt/uptime-kuma:/app/data \
-              --name uptime-kuma louislam/uptime-kuma:latest
-
-    - name: Reiniciar servicio de Docker (si no está usando contenedor)
+    - name: Reiniciar servicio de Uptime Kuma (si existe)
       service:
-        name: docker
+        name: uptime-kuma
         state: restarted
       ignore_errors: yes
+
+    - name: Verificar si el proceso de Uptime Kuma está activo
+      command: systemctl is-active uptime-kuma
+      register: kuma_status
+      ignore_errors: yes
+
+    - name: Mostrar estado de Uptime Kuma
+      debug:
+        msg: "Estado del servicio: {{ kuma_status.stdout | default('no encontrado') }}"
 
     - name: Crear carpeta de backups si no existe
       file:
@@ -51,10 +35,13 @@
         state: directory
         mode: '0755'
 
-    - name: Respaldar configuración de Uptime Kuma
-      archive:
-        path: /opt/uptime-kuma
-        dest: /opt/uptimekuma_backups/uptimekuma_backup_{{ ansible_date_time.date }}.tar.gz
+    - name: Respaldar base de datos o configuración (si existe)
+      shell: |
+        if [ -f /opt/uptime-kuma/data/kuma.db ]; then
+          cp /opt/uptime-kuma/data/kuma.db /opt/uptimekuma_backups/kuma_{{ ansible_date_time.date }}.db
+        fi
+      args:
+        warn: false
       ignore_errors: yes
 
     - name: Limpiar logs antiguos (más de 7 días)
@@ -71,6 +58,3 @@
       loop: "{{ old_logs.files }}"
       when: old_logs.matched > 0
 
-    - name: Mostrar mensaje final
-      debug:
-        msg: " Mantenimiento de Uptime Kuma completado correctamente en {{ uptimekuma_domain }}:{{ uptimekuma_port }}"

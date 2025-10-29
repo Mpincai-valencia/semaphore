@@ -1,4 +1,4 @@
-x- name: Mantenimiento automático de Vaultwarden
+- name: Mantenimiento automático de Vaultwarden
   hosts: vaultwarden
   become: yes
   tasks:

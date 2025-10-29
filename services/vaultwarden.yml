@@ -1,49 +1,96 @@
+---
 - name: Mantenimiento automático de Vaultwarden
   hosts: vaultwarden
   become: yes
-  tasks:
 
-    - name: Actualizar lista de paquetes
+  vars:
+    # Ajusta si tu ruta/contendor difieren
+    vaultwarden_container_name: "{{ vaultwarden_container_name | default('vaultwarden') }}"
+    vaultwarden_data_dir: "{{ vaultwarden_data_dir | default('/opt/vaultwarden') }}"   # si NO usas docker, suele ser /var/lib/vaultwarden
+    vaultwarden_backup_dir: "{{ vaultwarden_backup_dir | default('/opt/vaultwarden_backups') }}"
+
+  tasks:
+    - name: Actualizar cache de paquetes
       apt:
         update_cache: yes
 
-    - name: Actualizar todos los paquetes del sistema
+    - name: Actualizar paquetes del sistema
       apt:
         upgrade: dist
         autoremove: yes
         autoclean: yes
 
-    - name: Reiniciar servicio de Vaultwarden (si existe)
-      service:
-        name: vaultwarden
-        state: restarted
-      ignore_errors: yes
-
-    - name: Verificar si el proceso de Vaultwarden está activo
-      command: systemctl is-active vaultwarden
-      register: vaultwarden_status
-      ignore_errors: yes
-
-    - name: Mostrar estado del servicio Vaultwarden
-      debug:
-        msg: "Estado del servicio: {{ vaultwarden_status.stdout | default('no encontrado') }}"
-
     - name: Crear carpeta de backups si no existe
       file:
-        path: /opt/vaultwarden_backups
+        path: "{{ vaultwarden_backup_dir }}"
         state: directory
-        mode: '0755'
+        mode: "0755"
 
-    - name: Respaldar base de datos o configuración de Vaultwarden (si existe)
+    # ---------- Detectar despliegue en Docker ----------
+    - name: Comprobar si existe contenedor de Vaultwarden
+      shell: "docker ps -a --format '{{'{{'}}.Names{{'}}'}}' | grep -w {{ vaultwarden_container_name }}"
+      register: vw_container_check
+      changed_when: false
+      failed_when: false
+
+    # ---------- Backup en Docker ----------
+    - name: Respaldar base de datos desde contenedor (sin detenerlo)
       shell: |
-        if [ -f /opt/vaultwarden/data/vaultwarden.db ]; then
-          cp /opt/vaultwarden/data/vaultwarden.db /opt/vaultwarden_backups/vaultwarden_{{ ansible_date_time.date }}.db
-        fi
+        docker cp {{ vaultwarden_container_name }}:/data/vaultwarden.db {{ vaultwarden_backup_dir }}/vaultwarden_{{ ansible_date_time.iso8601_basic_short }}.db
+      when: vw_container_check.rc == 0
       args:
         warn: false
       ignore_errors: yes
 
-    - name: Limpiar logs antiguos (más de 7 días)
+    # ---------- Reinicio en Docker ----------
+    - name: Reiniciar contenedor de Vaultwarden
+      shell: "docker restart {{ vaultwarden_container_name }}"
+      when: vw_container_check.rc == 0
+      ignore_errors: yes
+
+    - name: Verificar que el contenedor está activo
+      shell: "docker ps --filter 'name={{ vaultwarden_container_name }}' --filter 'status=running' -q"
+      register: vw_docker_running
+      when: vw_container_check.rc == 0
+      changed_when: false
+      ignore_errors: yes
+
+    - name: Mostrar estado (Docker)
+      debug:
+        msg: "Contenedor en ejecución: {{ 'sí' if (vw_docker_running.stdout | length) > 0 else 'no' }}"
+      when: vw_container_check.rc == 0
+
+    # ---------- Camino systemd (no Docker) ----------
+    - name: Respaldar base de datos local (instalación sin Docker)
+      shell: |
+        if [ -f "{{ vaultwarden_data_dir }}/vaultwarden.db" ]; then
+          cp "{{ vaultwarden_data_dir }}/vaultwarden.db" "{{ vaultwarden_backup_dir }}/vaultwarden_{{ ansible_date_time.iso8601_basic_short }}.db"
+        fi
+      when: vw_container_check.rc != 0
+      args:
+        warn: false
+      ignore_errors: yes
+
+    - name: Reiniciar servicio Vaultwarden (systemd)
+      service:
+        name: vaultwarden
+        state: restarted
+      when: vw_container_check.rc != 0
+      ignore_errors: yes
+
+    - name: Verificar estado (systemd)
+      command: systemctl is-active vaultwarden
+      register: vw_service_status
+      when: vw_container_check.rc != 0
+      ignore_errors: yes
+
+    - name: Mostrar estado (systemd)
+      debug:
+        msg: "Estado del servicio: {{ vw_service_status.stdout | default('no encontrado') }}"
+      when: vw_container_check.rc != 0
+
+    # ---------- Limpiezas generales ----------
+    - name: Limpiar logs *.log > 7 días
       find:
         paths: /var/log
         age: 7d
@@ -55,5 +102,10 @@
         path: "{{ item.path }}"
         state: absent
       loop: "{{ old_logs.files }}"
-      when: old_logs.matched > 0
+      when: old_logs.matched | default(0) | int > 0
+
+    - name: Podar imágenes Docker colgantes (si hay Docker)
+      shell: "docker image prune -f"
+      when: vw_container_check.rc == 0
+      ignore_errors: yes
 

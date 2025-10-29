@@ -1,0 +1,64 @@
+---
+- name: Mantenimiento automático de Pulse
+  hosts: pulse
+  become: yes
+  vars:
+    backup_dir: /opt/pulse_backups
+    pulse_service: pulse
+
+  tasks:
+    - name: Actualizar lista de paquetes
+      apt:
+        update_cache: yes
+
+    - name: Actualizar todos los paquetes del sistema
+      apt:
+        upgrade: dist
+        autoremove: yes
+        autoclean: yes
+
+    - name: Crear carpeta de backups si no existe
+      file:
+        path: "{{ backup_dir }}"
+        state: directory
+        mode: '0755'
+
+    - name: Respaldar configuración de Pulse (si existe)
+      copy:
+        src: /etc/pulse/config.json
+        dest: "{{ backup_dir }}/config_{{ ansible_date_time.date }}.json"
+        remote_src: yes
+      ignore_errors: yes
+
+    - name: Respaldar base de datos de Pulse (si aplica y usa SQLite)
+      command: cp /var/lib/pulse/pulse.db {{ backup_dir }}/pulse_db_{{ ansible_date_time.date }}.db
+      ignore_errors: yes
+
+    - name: Reiniciar servicio de Pulse
+      service:
+        name: "{{ pulse_service }}"
+        state: restarted
+      ignore_errors: yes
+
+    - name: Verificar estado del servicio de Pulse
+      command: systemctl is-active "{{ pulse_service }}"
+      register: pulse_status
+      ignore_errors: yes
+
+    - name: Mostrar estado del servicio Pulse
+      debug:
+        msg: "Estado del servicio Pulse: {{ pulse_status.stdout }}"
+
+    - name: Limpiar logs antiguos (más de 7 días)
+      find:
+        paths: /var/log
+        age: 7d
+        patterns: "*.log"
+      register: old_logs
+
+    - name: Eliminar logs antiguos
+      file:
+        path: "{{ item.path }}"
+        state: absent
+      loop: "{{ old_logs.files }}"
+      when: old_logs.matched > 0

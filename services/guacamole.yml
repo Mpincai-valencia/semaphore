@@ -1,5 +1,5 @@
 ---
-- name: Deploy Guacamole con Docker
+- name: Instalar Docker CE y desplegar Guacamole
   hosts: guacamole
   become: true
 
@@ -12,9 +12,50 @@
     guac_data_path: /opt/guacamole/data
 
   tasks:
-    - name: Instalar Docker
+    - name: Eliminar posibles paquetes conflictivos
       apt:
-        name: docker.io
+        name:
+          - docker.io
+          - containerd
+          - containerd.io
+          - runc
+        state: absent
+      ignore_errors: yes
+
+    - name: Instalar dependencias necesarias
+      apt:
+        name:
+          - ca-certificates
+          - curl
+          - gnupg
+          - lsb-release
+        state: present
+        update_cache: yes
+
+    - name: Agregar clave GPG oficial de Docker
+      shell: |
+        install -m 0755 -d /etc/apt/keyrings
+        curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+        chmod a+r /etc/apt/keyrings/docker.gpg
+      args:
+        warn: false
+
+    - name: Agregar repositorio oficial de Docker
+      shell: |
+        echo \
+        "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] \
+        https://download.docker.com/linux/ubuntu \
+        $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
+      args:
+        warn: false
+
+    - name: Actualizar e instalar Docker CE
+      apt:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - docker-compose-plugin
         state: present
         update_cache: yes
 
@@ -43,6 +84,10 @@
       args:
         warn: false
 
+    - name: Esperar 20 segundos para que la base de datos inicialice
+      pause:
+        seconds: 20
+
     - name: Desplegar contenedor Guacamole
       shell: |
         docker run -d --name guacamole \
@@ -56,4 +101,3 @@
           guacamole/guacamole:latest
       args:
         warn: false
-

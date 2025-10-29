@@ -1,0 +1,58 @@
+---
+- name: Mantenimiento automático de Homarr
+  hosts: homarr
+  become: yes
+  vars:
+    homarr_container_name: homarr
+    homarr_backup_path: /opt/homarr_backups
+  tasks:
+
+    - name: Actualizar lista de paquetes
+      apt:
+        update_cache: yes
+
+    - name: Actualizar todos los paquetes del sistema
+      apt:
+        upgrade: dist
+        autoremove: yes
+        autoclean: yes
+
+    - name: Verificar si Homarr está en Docker
+      command: docker ps --filter "name={{ homarr_container_name }}" --format "{{ '{{.Names}}' }}"
+      register: homarr_docker_check
+      ignore_errors: yes
+
+    - name: Actualizar contenedor Homarr (si está en Docker)
+      block:
+        - name: Descargar la última imagen de Homarr
+          command: docker pull ghcr.io/ajnart/homarr:latest
+        - name: Reiniciar contenedor Homarr
+          command: docker restart {{ homarr_container_name }}
+      when: homarr_docker_check.stdout != ""
+
+    - name: Crear carpeta de backups si no existe
+      file:
+        path: "{{ homarr_backup_path }}"
+        state: directory
+        mode: '0755'
+
+    - name: Respaldar configuración de Homarr
+      copy:
+        src: /opt/homarr/configs/config.json
+        dest: "{{ homarr_backup_path }}/config_{{ ansible_date_time.date }}.json"
+        remote_src: yes
+      ignore_errors: yes
+
+    - name: Limpiar logs antiguos (más de 7 días)
+      find:
+        paths: /var/log
+        age: 7d
+        patterns: "*.log"
+      register: old_logs
+
+    - name: Eliminar logs antiguos
+      file:
+        path: "{{ item.path }}"
+        state: absent
+      loop: "{{ old_logs.files }}"
+      when: old_logs.matched > 0

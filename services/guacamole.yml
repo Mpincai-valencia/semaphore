@@ -1,0 +1,59 @@
+---
+- name: Deploy Guacamole con Docker
+  hosts: guacamole
+  become: true
+
+  vars:
+    guac_network: guacnet
+    guac_db_name: guacdb
+    guac_db_user: guacuser
+    guac_db_pass: guacpass
+    guac_port: 8080
+    guac_data_path: /opt/guacamole/data
+
+  tasks:
+    - name: Instalar Docker
+      apt:
+        name: docker.io
+        state: present
+        update_cache: yes
+
+    - name: Crear carpeta de datos de Guacamole
+      file:
+        path: "{{ guac_data_path }}"
+        state: directory
+        mode: "0755"
+
+    - name: Crear red Docker
+      shell: docker network create {{ guac_network }} 2>/dev/null || true
+      args:
+        warn: false
+
+    - name: Desplegar contenedor MySQL para Guacamole
+      shell: |
+        docker run -d --name guacdb \
+          --restart unless-stopped \
+          --network {{ guac_network }} \
+          -e MYSQL_ROOT_PASSWORD={{ guac_db_pass }} \
+          -e MYSQL_DATABASE={{ guac_db_name }} \
+          -e MYSQL_USER={{ guac_db_user }} \
+          -e MYSQL_PASSWORD={{ guac_db_pass }} \
+          -v {{ guac_data_path }}/mysql:/var/lib/mysql \
+          mysql:8.0
+      args:
+        warn: false
+
+    - name: Desplegar contenedor Guacamole
+      shell: |
+        docker run -d --name guacamole \
+          --restart unless-stopped \
+          --network {{ guac_network }} \
+          -p {{ guac_port }}:8080 \
+          -e MYSQL_HOST=guacdb \
+          -e MYSQL_DATABASE={{ guac_db_name }} \
+          -e MYSQL_USER={{ guac_db_user }} \
+          -e MYSQL_PASSWORD={{ guac_db_pass }} \
+          guacamole/guacamole:latest
+      args:
+        warn: false
+

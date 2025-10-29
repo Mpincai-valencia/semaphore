@@ -33,7 +33,7 @@
 
     - name: Mostrar estado de Tomcat en salida
       debug:
-        msg: "Estado de Tomcat: {{ tomcat_status.stdout }}"
+        msg: "Estado de Tomcat: {{ tomcat_status.stdout | default('No se pudo obtener estado') }}"
 
     - name: Crear carpeta de backups si no existe
       file:
@@ -41,11 +41,22 @@
         state: directory
         mode: '0755'
 
-    - name: Respaldar archivo de configuración de Guacamole
+    - name: Buscar archivo de configuración de Guacamole
+      find:
+        paths:
+          - /etc/guacamole
+          - /usr/share/tomcat9/.guacamole
+          - /etc
+        patterns: "guacamole.properties"
+      register: guac_config
+
+    - name: Respaldar archivo de configuración (si existe)
       copy:
-        src: /etc/guacamole/guacamole.properties
-        dest: /opt/guacamole_backups/guacamole.properties_{{ ansible_date_time.date }}
+        src: "{{ guac_config.files[0].path }}"
+        dest: "/opt/guacamole_backups/guacamole.properties_{{ ansible_date_time.date }}"
         remote_src: yes
+      when: guac_config.matched > 0
+      ignore_errors: yes
 
     - name: Respaldar base de datos de Guacamole (si usa MySQL)
       command: mysqldump -u root -p'your_password' guacamole_db > /opt/guacamole_backups/guacamole_db_{{ ansible_date_time.date }}.sql
@@ -64,3 +75,4 @@
         state: absent
       loop: "{{ old_logs.files }}"
       when: old_logs.matched > 0
+

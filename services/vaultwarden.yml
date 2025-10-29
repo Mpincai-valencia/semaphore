@@ -1,0 +1,59 @@
+x- name: Mantenimiento automático de Vaultwarden
+  hosts: vaultwarden
+  become: yes
+  tasks:
+
+    - name: Actualizar lista de paquetes
+      apt:
+        update_cache: yes
+
+    - name: Actualizar todos los paquetes del sistema
+      apt:
+        upgrade: dist
+        autoremove: yes
+        autoclean: yes
+
+    - name: Reiniciar servicio de Vaultwarden (si existe)
+      service:
+        name: vaultwarden
+        state: restarted
+      ignore_errors: yes
+
+    - name: Verificar si el proceso de Vaultwarden está activo
+      command: systemctl is-active vaultwarden
+      register: vaultwarden_status
+      ignore_errors: yes
+
+    - name: Mostrar estado del servicio Vaultwarden
+      debug:
+        msg: "Estado del servicio: {{ vaultwarden_status.stdout | default('no encontrado') }}"
+
+    - name: Crear carpeta de backups si no existe
+      file:
+        path: /opt/vaultwarden_backups
+        state: directory
+        mode: '0755'
+
+    - name: Respaldar base de datos o configuración de Vaultwarden (si existe)
+      shell: |
+        if [ -f /opt/vaultwarden/data/vaultwarden.db ]; then
+          cp /opt/vaultwarden/data/vaultwarden.db /opt/vaultwarden_backups/vaultwarden_{{ ansible_date_time.date }}.db
+        fi
+      args:
+        warn: false
+      ignore_errors: yes
+
+    - name: Limpiar logs antiguos (más de 7 días)
+      find:
+        paths: /var/log
+        age: 7d
+        patterns: "*.log"
+      register: old_logs
+
+    - name: Eliminar logs antiguos
+      file:
+        path: "{{ item.path }}"
+        state: absent
+      loop: "{{ old_logs.files }}"
+      when: old_logs.matched > 0
+

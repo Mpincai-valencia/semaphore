@@ -1,37 +1,33 @@
-- name: Deploy Gitea with Docker
-  hosts: 192.168.200.125
+- name: Deploy Gitea con Docker
+  hosts: gitea
   become: true
-  remote_user: "{{ ansible_ssh_user }}"  # Usando la variable ansible_ssh_user
 
   tasks:
-    - name: Install Docker
+    - name: Instalar Docker
       apt:
         name: docker.io
         state: present
         update_cache: yes
 
-    - name: Create data directory for Gitea
+    - name: Crear carpeta de datos de Gitea
       file:
         path: "{{ gitea_data_path }}"
         state: directory
         mode: "0755"
 
-    - name: Stop existing Gitea container if exists
+    - name: Detener contenedor Gitea si existe
       shell: docker rm -f gitea 2>/dev/null || true
       args:
         warn: false
 
-    - name: Deploy Gitea container
+    - name: Desplegar contenedor Gitea
       shell: |
         docker run -d --name gitea \
           --restart unless-stopped \
-          -p {{ gitea_port }}:3052 \
+          -p {{ gitea_port }}:3000 \
           -e GITEA__server__DOMAIN="{{ gitea_domain }}" \
-          -e GITEA__security__INSTALL_LOCK="true" \
-          -e GITEA__database__DB_TYPE="sqlite3" \
-          -e GITEA__database__PATH="{{ gitea_data_path }}/gitea.db" \
-          -e GITEA__security__SECRET_KEY="random_secret_key" \
-          -e GITEA__security__INTERNAL_TOKEN="random_internal_token" \
+          -e GITEA__security__ADMIN_USER="{{ gitea_admin_user }}" \
+          -e GITEA__security__ADMIN_PASSWORD="{{ gitea_admin_password }}" \
           -v {{ gitea_data_path }}:/data \
           gitea/gitea:latest
       args:

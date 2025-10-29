@@ -1,7 +1,8 @@
 ---
-- name: Deploy Guacamole
-  hosts: guacamole
+- name: Desplegar Guacamole con Docker
+  hosts: all
   become: yes
+
   vars:
     guacamole_port: "{{ guacamole_port }}"
     guacamole_domain: "{{ guacamole_domain }}"
@@ -9,24 +10,67 @@
     guacamole_admin_password: "{{ guacamole_admin_password }}"
 
   tasks:
-    - name: Install Guacamole
-      docker_container:
-        name: guacamole
-        image: guacamole/guacamole:latest
-        state: started
-        restart_policy: always
-        exposed_ports:
-          - "{{ guacamole_port }}"
-        published_ports:
-          - "{{ guacamole_port }}:8080"
-        env:
-          GUACAMOLE_HOME: "/etc/guacamole"
-          GUACAMOLE_USER: "{{ guacamole_admin_user }}"
-          GUACAMOLE_PASSWORD: "{{ guacamole_admin_password }}"
-        volumes:
-          - /opt/guacamole:/etc/guacamole
-        networks:
-          - guacamole_network
-      tags:
-        - guacamole
+    - name: Instalar dependencias necesarias
+      apt:
+        name:
+          - docker.io
+          - docker-compose
+        state: present
+        update_cache: yes
 
+    - name: Crear directorio de datos de Guacamole
+      file:
+        path: /opt/guacamole
+        state: directory
+        owner: "{{ ansible_ssh_user }}"
+        mode: '0755'
+
+    - name: Crear archivo docker-compose.yml de Guacamole
+      copy:
+        dest: /opt/guacamole/docker-compose.yml
+        content: |
+          version: '3'
+          services:
+            guacd:
+              image: guacamole/guacd
+              container_name: guacd
+              restart: unless-stopped
+
+            guacamole:
+              image: guacamole/guacamole
+              container_name: guacamole
+              restart: unless-stopped
+              ports:
+                - "{{ guacamole_port }}:8080"
+              environment:
+                - GUACD_HOSTNAME=guacd
+                - MYSQL_HOSTNAME=mysql
+                - MYSQL_PORT=3306
+                - MYSQL_DATABASE=guacamole_db
+                - MYSQL_USER={{ guacamole_admin_user }}
+                - MYSQL_PASSWORD={{ guacamole_admin_password }}
+                - GUACAMOLE_HOME=/guacamole
+              depends_on:
+                - guacd
+                - mysql
+
+            mysql:
+              image: mysql:8
+              container_name: guac-mysql
+              restart: unless-stopped
+              environment:
+                - MYSQL_ROOT_PASSWORD={{ guacamole_admin_password }}
+                - MYSQL_DATABASE=guacamole_db
+                - MYSQL_USER={{ guacamole_admin_user }}
+                - MYSQL_PASSWORD={{ guacamole_admin_password }}
+              volumes:
+                - /opt/guacamole/mysql:/var/lib/mysql
+
+    - name: Levantar contenedores de Guacamole
+      command: docker-compose up -d
+      args:
+        chdir: /opt/guacamole
+
+    - name: Mostrar URL de acceso
+      debug:
+        msg: "Guacamole desplegado en http://{{ guacamole_domain }}:{{ guacamole_port }}"

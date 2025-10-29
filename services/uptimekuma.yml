@@ -1,0 +1,76 @@
+---
+- name: Mantenimiento automático de Uptime Kuma
+  hosts: uptimekuma
+  become: yes
+  vars:
+    uptimekuma_port: "{{ lookup('env', 'uptimekuma_port') | default('3001', true) }}"
+    uptimekuma_domain: "{{ lookup('env', 'uptimekuma_domain') }}"
+    uptimekuma_admin_user: "{{ lookup('env', 'uptimekuma_admin_user') }}"
+    uptimekuma_admin_password: "{{ lookup('env', 'uptimekuma_admin_password') }}"
+  tasks:
+
+    - name: Actualizar lista de paquetes
+      apt:
+        update_cache: yes
+
+    - name: Actualizar todos los paquetes del sistema
+      apt:
+        upgrade: dist
+        autoremove: yes
+        autoclean: yes
+
+    - name: Verificar si el contenedor de Uptime Kuma existe
+      command: docker ps -a --filter "name=uptime-kuma" --format "{{'{{.Names}}'}}"
+      register: kuma_container
+      ignore_errors: yes
+
+    - name: Actualizar imagen de Uptime Kuma (si usa Docker)
+      when: kuma_container.stdout != ""
+      block:
+        - name: Descargar última versión de la imagen
+          command: docker pull louislam/uptime-kuma:latest
+
+        - name: Reiniciar contenedor Uptime Kuma con la nueva imagen
+          shell: |
+            docker stop uptime-kuma
+            docker rm uptime-kuma
+            docker run -d --restart=always \
+              -p {{ uptimekuma_port }}:3001 \
+              -v /opt/uptime-kuma:/app/data \
+              --name uptime-kuma louislam/uptime-kuma:latest
+
+    - name: Reiniciar servicio de Docker (si no está usando contenedor)
+      service:
+        name: docker
+        state: restarted
+      ignore_errors: yes
+
+    - name: Crear carpeta de backups si no existe
+      file:
+        path: /opt/uptimekuma_backups
+        state: directory
+        mode: '0755'
+
+    - name: Respaldar configuración de Uptime Kuma
+      archive:
+        path: /opt/uptime-kuma
+        dest: /opt/uptimekuma_backups/uptimekuma_backup_{{ ansible_date_time.date }}.tar.gz
+      ignore_errors: yes
+
+    - name: Limpiar logs antiguos (más de 7 días)
+      find:
+        paths: /var/log
+        age: 7d
+        patterns: "*.log"
+      register: old_logs
+
+    - name: Eliminar logs antiguos
+      file:
+        path: "{{ item.path }}"
+        state: absent
+      loop: "{{ old_logs.files }}"
+      when: old_logs.matched > 0
+
+    - name: Mostrar mensaje final
+      debug:
+        msg: " Mantenimiento de Uptime Kuma completado correctamente en {{ uptimekuma_domain }}:{{ uptimekuma_port }}"

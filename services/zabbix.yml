@@ -1,4 +1,4 @@
-k---
+---
 - name: Mantenimiento automático de Zabbix
   hosts: zabbix
   become: yes
@@ -60,3 +60,4 @@ k---
         state: absent
       loop: "{{ old_logs.files }}"
       when: old_logs.matched | int > 0
+

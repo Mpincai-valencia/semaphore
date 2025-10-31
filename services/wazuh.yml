@@ -1,0 +1,69 @@
+---
+- name: Mantenimiento automático de Wazuh
+  hosts: wazuh
+  become: yes
+  tasks:
+
+    - name: Actualizar lista de paquetes
+      ansible.builtin.apt:
+        update_cache: yes
+
+    - name: Actualizar todos los paquetes del sistema
+      ansible.builtin.apt:
+        upgrade: dist
+        autoremove: yes
+        autoclean: yes
+
+    - name: Reiniciar servicio de Wazuh Manager (si existe)
+      ansible.builtin.service:
+        name: wazuh-manager
+        state: restarted
+      ignore_errors: yes
+
+    - name: Verificar si el proceso de Wazuh Manager está activo
+      ansible.builtin.command: systemctl is-active wazuh-manager
+      register: wazuh_status
+      ignore_errors: yes
+
+    - name: Mostrar estado del servicio Wazuh
+      ansible.builtin.debug:
+        msg: "Estado del servicio Wazuh: {{ wazuh_status.stdout | default('no encontrado') }}"
+
+    - name: Crear carpeta de backups si no existe
+      ansible.builtin.file:
+        path: /opt/wazuh_backups
+        state: directory
+        mode: '0755'
+
+    - name: Respaldar configuración principal de Wazuh
+      ansible.builtin.shell: |
+        TIMESTAMP=$(date +%Y%m%d_%H%M)
+        BACKUP_DIR="/opt/wazuh_backups/$TIMESTAMP"
+        mkdir -p $BACKUP_DIR
+        if [ -d /var/ossec/etc ]; then
+          cp -r /var/ossec/etc $BACKUP_DIR/
+        fi
+        if [ -d /var/ossec/ruleset ]; then
+          cp -r /var/ossec/ruleset $BACKUP_DIR/
+        fi
+        if [ -f /var/ossec/etc/ossec.conf ]; then
+          cp /var/ossec/etc/ossec.conf $BACKUP_DIR/
+        fi
+      args:
+        warn: false
+      ignore_errors: yes
+
+    - name: Limpiar logs antiguos (más de 7 días)
+      ansible.builtin.find:
+        paths: /var/ossec/logs
+        age: 7d
+        patterns: "*.log"
+      register: old_logs
+
+    - name: Eliminar logs antiguos
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: absent
+      loop: "{{ old_logs.files }}"
+      when: old_logs.matched > 0
+

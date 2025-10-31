@@ -1,4 +1,4 @@
----
+k---
 - name: Mantenimiento automático de Zabbix
   hosts: zabbix
   become: yes
@@ -35,6 +35,28 @@
         state: directory
         mode: "0755"
 
-    - name: Respaldar base de datos o configuración (si existe)
-      shell: |
+    - name: Verificar si existe la carpeta de datos de Zabbix
+      stat:
+        path: /var/lib/zabbix
+      register: zabbix_data_dir
 
+    - name: Respaldar base de datos o configuración (si existe)
+      shell: 'tar -czf /opt/zabbix_backups/zabbix_backup_{{ ansible_date_time.date }}.tar.gz /var/lib/zabbix'
+      when: zabbix_data_dir.stat.exists
+      args:
+        warn: false
+      ignore_errors: yes
+
+    - name: Buscar logs antiguos (más de 7 días)
+      find:
+        paths: /var/log
+        age: 7d
+        patterns: "*.log"
+      register: old_logs
+
+    - name: Eliminar logs antiguos
+      file:
+        path: "{{ item.path }}"
+        state: absent
+      loop: "{{ old_logs.files }}"
+      when: old_logs.matched | int > 0

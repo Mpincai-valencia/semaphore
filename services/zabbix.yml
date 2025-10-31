@@ -21,17 +21,11 @@
       ignore_errors: yes
 
     - name: Verificar si el contenedor de Zabbix está activo (si aplica)
-      shell: docker ps --filter "name=zabbix" --format "{{.Names}}: {{.Status}}"
+      shell: 'docker ps --filter "name=zabbix" --format "{{"{{.Names}}"}}: {{"{{.Status}}"}}"'
       register: zabbix_container_status
       ignore_errors: yes
 
     - name: Mostrar estado del contenedor o servicio de Zabbix
       debug:
-        msg: "{{ zabbix_container_status.stdout | default('Zabbix no encontrado o detenido') }}"
-
-    - name: Crear carpeta de backups si no existe
-      file:
-        path: /opt/zabbix_backups
-        state: directory
-        mode: '0755
+        msg: "{{ zabbix_container_status.stdout | default('Zabbix no encon
 

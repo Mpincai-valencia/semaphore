@@ -1,0 +1,131 @@
+---
+- name: Mantenimiento automático de Zoraxy
+  hosts: zoraxy
+  become: yes
+  vars:
+    backup_dir: /opt/zoraxy_backups
+    zoraxy_service_name: zoraxy
+    zoraxy_container_name: zoraxy
+  tasks:
+
+    - name: Actualizar lista de paquetes (Debian/Ubuntu)
+      apt:
+        update_cache: yes
+      when: ansible_os_family == "Debian"
+
+    - name: Actualizar lista de paquetes (Alpine)
+      apk:
+        update_cache: yes
+      when: ansible_distribution == "Alpine"
+
+    - name: Actualizar todos los paquetes del sistema (Debian/Ubuntu)
+      apt:
+        upgrade: dist
+        autoremove: yes
+        autoclean: yes
+      when: ansible_os_family == "Debian"
+
+    - name: Actualizar todos los paquetes del sistema (Alpine)
+      apk:
+        upgrade: yes
+      when: ansible_distribution == "Alpine"
+
+    - name: Comprobar si existe servicio systemd de Zoraxy
+      service_facts:
+
+    - name: Reiniciar servicio de Zoraxy si existe
+      service:
+        name: "{{ zoraxy_service_name }}"
+        state: restarted
+      when: zoraxy_service_name in ansible_facts.services
+      ignore_errors: yes
+
+    - name: Verificar si el contenedor Zoraxy está corriendo (Docker)
+      shell: 'docker ps --filter "name={{ zoraxy_container_name }}" --format "{{"{{.Names}}"}}: {{"{{.Status}}"}}"'
+      register: zoraxy_container_status
+      ignore_errors: yes
+
+    - name: Mostrar estado de Zoraxy (servicio o contenedor)
+      debug:
+        msg: >-
+          Estado servicio: {{
+          (ansible_facts.services[zoraxy_service_name].state if (zoraxy_service_name in ansible_facts.services) else "no encontrado")
+          }} |
+          Estado contenedor: '{{ zoraxy_container_status.stdout | default("no encontrado") }}'
+
+    - name: Crear carpeta de backups si no existe
+      file:
+        path: "{{ backup_dir }}"
+        state: directory
+        mode: "0755"
+
+    - name: Comprobar ruta de datos típica (service/container)
+      stat:
+        path: /var/lib/zoraxy
+      register: zoraxy_data_dir
+
+    - name: Respaldar carpeta de datos si existe (tar.gz)
+      shell: 'tar -czf {{ backup_dir }}/zoraxy_data_{{ ansible_date_time.date }}.tgz -C /var/lib zoraxy'
+      when: zoraxy_data_dir.stat.exists
+      args:
+        warn: false
+      ignore_errors: yes
+
+    - name: Intentar respaldo de volúmenes Docker (si existe container y docker)
+      shell: |
+        set -e
+        CONTAINER=$(docker ps -qf "name={{ zoraxy_container_name }}")
+        if [ -n "$CONTAINER" ]; then
+          TIMESTAMP=$(date +%F_%H-%M-%S)
+          docker exec "$CONTAINER" tar -czf /tmp/zoraxy_internal_backup_$TIMESTAMP.tgz /app/data || true
+          docker cp "$CONTAINER":/tmp/zoraxy_internal_backup_$TIMESTAMP.tgz "{{ backup_dir }}/" || true
+          docker exec "$CONTAINER" rm -f /tmp/zoraxy_internal_backup_$TIMESTAMP.tgz || true
+        fi
+      args:
+        warn: false
+      register: docker_backup_attempt
+      changed_when: "'copied' in docker_backup_attempt.stdout or docker_backup_attempt.rc == 0"
+      ignore_errors: yes
+
+    - name: Verificar logs rotados en /var/log/zoraxy (más de 7 días)
+      find:
+        paths: /var/log/zoraxy
+        age: 7d
+        patterns: "*.log"
+      register: zoraxy_old_logs
+      ignore_errors: yes
+
+    - name: Eliminar logs antiguos de Zoraxy
+      file:
+        path: "{{ item.path }}"
+        state: absent
+      loop: "{{ zoraxy_old_logs.files | default([]) }}"
+      when: zoraxy_old_logs.matched | default(0) | int > 0
+
+    - name: Buscar logs antiguos globales del sistema (más de 14 días)
+      find:
+        paths: /var/log
+        age: 14d
+        patterns: "*.log"
+      register: system_old_logs
+
+    - name: Eliminar logs antiguos del sistema
+      file:
+        path: "{{ item.path }}"
+        state: absent
+      loop: "{{ system_old_logs.files | default([]) }}"
+      when: system_old_logs.matched | default(0) | int > 0
+
+    - name: Comprobar estado final del servicio si existe
+      command: systemctl is-active {{ zoraxy_service_name }}
+      register: zoraxy_final_status
+      ignore_errors: yes
+      when: zoraxy_service_name in ansible_facts.services
+
+    - name: Mostrar estado final (service/container)
+      debug:
+        msg: >-
+          Resultado final - servicio: {{ zoraxy_final_status.stdout | default('no service') }},
+          contenedor: {{ zoraxy_container_status.stdout | default('no container') }}
+
+

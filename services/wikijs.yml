@@ -1,0 +1,70 @@
+---
+- name: Mantenimiento automático de Wiki.js
+  hosts: wikijs
+  become: yes
+
+  tasks:
+    - name: Actualizar lista de paquetes del sistema
+      apt:
+        update_cache: yes
+
+    - name: Actualizar todos los paquetes del sistema
+      apt:
+        upgrade: dist
+        autoremove: yes
+        autoclean: yes
+
+    - name: Reiniciar contenedor de Wiki.js (si existe)
+      shell: |
+        CONTAINER_ID=$(docker ps -qf "name=wikijs")
+        if [ -n "$CONTAINER_ID" ]; then
+          docker restart $CONTAINER_ID
+        fi
+      args:
+        warn: false
+      ignore_errors: yes
+
+    - name: Verificar si el contenedor de Wiki.js está corriendo
+      shell: |
+        docker ps --filter "name=wikijs" --format "{{.Status}}"
+      register: wikijs_status
+      ignore_errors: yes
+
+    - name: Mostrar estado del contenedor Wiki.js
+      debug:
+        msg: "Estado del contenedor Wiki.js: {{ wikijs_status.stdout | default('no encontrado') }}"
+
+    - name: Crear carpeta de backups si no existe
+      file:
+        path: /opt/wikijs_backups
+        state: directory
+        mode: '0755'
+
+    - name: Respaldar base de datos o configuración (si existe)
+      shell: |
+        BACKUP_DIR=/opt/wikijs_backups
+        TIMESTAMP=$(date +%F_%H-%M-%S)
+        if [ -f /var/lib/docker/volumes/wikijs_data/_data/config.yml ]; then
+          cp /var/lib/docker/volumes/wikijs_data/_data/config.yml $BACKUP_DIR/config_{{ ansible_date_time.date }}.yml
+        fi
+        if docker ps | grep wikijs-db; then
+          docker exec wikijs-db pg_dump -U wikijs wikijs > $BACKUP_DIR/db_backup_$TIMESTAMP.sql
+        fi
+      args:
+        warn: false
+      ignore_errors: yes
+
+    - name: Limpiar logs antiguos (más de 7 días)
+      find:
+        paths: /var/log
+        age: 7d
+        patterns: "*.log"
+      register: old_logs
+
+    - name: Eliminar logs antiguos
+      file:
+        path: "{{ item.path }}"
+        state: absent
+      loop: "{{ old_logs.files }}"
+      when: old_logs.matched > 0
+

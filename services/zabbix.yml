@@ -21,8 +21,7 @@
       ignore_errors: yes
 
     - name: Verificar si el contenedor de Zabbix está activo (si aplica)
-      shell: |
-        docker ps --filter "name=zabbix" --format "{{.Names}}: {{.Status}}"
+      shell: docker ps --filter "name=zabbix" --format "{{.Names}}: {{.Status}}"
       register: zabbix_container_status
       ignore_errors: yes
 
@@ -34,16 +33,5 @@
       file:
         path: /opt/zabbix_backups
         state: directory
-        mode: '0755'
-
-    - name: Respaldar base de datos (si existe archivo de configuración)
-      shell: |
-        if [ -d /var/lib/zabbix ]; then
-          tar -czf /opt/zabbix_backups/zabbix_backup_{{ ansible_date_time.date }}.tar.gz /var/lib/zabbix
-        fi
-      args:
-        warn: false
-      ignore_errors: yes
-
-    - name: Limpiar logs antiguos (más de 7 días)
+        mode: '0755
 

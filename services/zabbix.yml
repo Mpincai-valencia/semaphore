@@ -1,0 +1,49 @@
+---
+- name: Mantenimiento automático de Zabbix
+  hosts: zabbix
+  become: yes
+
+  tasks:
+    - name: Actualizar lista de paquetes
+      apt:
+        update_cache: yes
+
+    - name: Actualizar todos los paquetes del sistema
+      apt:
+        upgrade: dist
+        autoremove: yes
+        autoclean: yes
+
+    - name: Reiniciar servicio de Zabbix (si existe)
+      service:
+        name: zabbix-server
+        state: restarted
+      ignore_errors: yes
+
+    - name: Verificar si el contenedor de Zabbix está activo (si aplica)
+      shell: |
+        docker ps --filter "name=zabbix" --format "{{.Names}}: {{.Status}}"
+      register: zabbix_container_status
+      ignore_errors: yes
+
+    - name: Mostrar estado del contenedor o servicio de Zabbix
+      debug:
+        msg: "{{ zabbix_container_status.stdout | default('Zabbix no encontrado o detenido') }}"
+
+    - name: Crear carpeta de backups si no existe
+      file:
+        path: /opt/zabbix_backups
+        state: directory
+        mode: '0755'
+
+    - name: Respaldar base de datos (si existe archivo de configuración)
+      shell: |
+        if [ -d /var/lib/zabbix ]; then
+          tar -czf /opt/zabbix_backups/zabbix_backup_{{ ansible_date_time.date }}.tar.gz /var/lib/zabbix
+        fi
+      args:
+        warn: false
+      ignore_errors: yes
+
+    - name: Limpiar logs antiguos (más de 7 días)
+
